@@ -8,23 +8,49 @@ from contextlib import asynccontextmanager
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from keras.models import load_model
+from tensorflow.keras.layers import Layer, Dense
+import tensorflow as tf
 import numpy as np
 import pickle
 import re
 
 
+"""
+0. Custom Attention layer used inside the deployed model.
+This has to be defined here (or imported from wherever it's defined) because
+Keras needs the class available to rebuild the layer when load_model() reads
+the .keras file -- it's not a built-in layer like Dense or GRU.
+"""
+class BahdanauAttention(Layer):
+    def __init__(self, units=64, **kwargs):
+        super().__init__(**kwargs)
+        self.units = units
+        self.W = Dense(units, use_bias=True, name="attn_W")
+        self.V = Dense(1, use_bias=False, name="attn_V")
+
+    def call(self, hidden_states):
+        score = self.V(tf.nn.tanh(self.W(hidden_states)))
+        attention_weights = tf.nn.softmax(score, axis=1)
+        context_vector = attention_weights * hidden_states
+        context_vector = tf.reduce_sum(context_vector, axis=1)
+        return context_vector, attention_weights
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"units": self.units})
+        return config
 
 
 """
 1. We are going to make some constants like:
-A. Model Path (BiGRU)
+A. Model Path (BiGRU + Attention + GloVe)
 B. Tokenizer Path
 C. Max Sequence Length
 D. Emotion Labels
 E. Emotion emojis
 """
-#A. Model Path (BiGRU)
-model_path = "artifacts/models/BiGRU_Model.keras"
+#A. Model Path (BiGRU + Attention + GloVe -- best performing model so far)
+model_path = "artifacts/models/BiGRU_Attention_GloVe_Model.keras"
 
 #B. Tokenizer Path
 tokenizer_path = "artifacts/models/tokenizer.pkl"
@@ -99,7 +125,7 @@ dl_model = {} #{1. BiGRU, 2. Tokenizer}-> True , {} -> False
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print('Loading the model and tokenizer...')
-    dl_model["BiGRU"] = load_model(model_path)                      #BiGRU Model
+    dl_model["BiGRU"] = load_model(model_path, custom_objects={"BahdanauAttention": BahdanauAttention})   #BiGRU + Attention + GloVe Model
     with open(tokenizer_path, 'rb') as file:
         dl_model["Tokenizer"] = pickle.load(file)
     print('Model are loaded successfully...')   

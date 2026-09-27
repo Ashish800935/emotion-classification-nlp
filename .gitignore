@@ -4,3 +4,4 @@ __pycache__/
 .ipynb_checkpoints/
 .env
 .vscode/
+artifacts/glove.6B.300d.txt
